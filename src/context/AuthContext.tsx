@@ -12,6 +12,7 @@ interface AuthContextType {
   loading: boolean;
   login: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
+  signUp: (email: string, password: string) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -63,6 +64,36 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
   }, []);
 
+  const signUp = async (email: string, password: string) => {
+    if (!supabase) throw new Error("Supabase not configured");
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        emailRedirectTo: `${window.location.origin}/login`,
+      },
+    });
+    if (error) throw error;
+
+    // Create a default profile entry with role 'member'
+    const newUserId = data.user?.id;
+    if (newUserId) {
+      // Use upsert to avoid duplicates if there is a trigger
+      const { error: profileError } = await supabase
+        .from("profiles")
+        .upsert({ id: newUserId, role: "member" }, { onConflict: "id" });
+      if (profileError) {
+        // eslint-disable-next-line no-console
+        console.warn("Failed to upsert profile:", profileError.message);
+      }
+
+      // If we already have a session (email confirm not required), load profile
+      if (data.session) {
+        await getProfile(newUserId, data.user?.email || "");
+      }
+    }
+  };
+
   const login = async (email: string, password: string) => {
     if (!supabase) throw new Error("Supabase not configured");
     const { data, error } = await supabase.auth.signInWithPassword({ email, password });
@@ -78,7 +109,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setUser(null);
   };
 
-  const value = useMemo(() => ({ user, loading, login, logout }), [user, loading]);
+  const value = useMemo(() => ({ user, loading, login, logout, signUp }), [user, loading]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };
