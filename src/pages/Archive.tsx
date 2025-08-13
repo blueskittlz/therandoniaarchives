@@ -15,6 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Slider } from "@/components/ui/slider";
 import Editor from "@monaco-editor/react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { Switch } from "@/components/ui/switch";
 
 interface Book {
   id: number;
@@ -147,6 +148,7 @@ const Archive = () => {
   const [sortBy, setSortBy] = useState<"recent" | "title" | "author">("recent");
   const [onlyFavorites, setOnlyFavorites] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
+  const [retro, setRetro] = useState(false);
 
   const currentPages = useMemo(() => paginate(expandedBook?.content_md || ""), [expandedBook]);
   const currentPageText = currentPages[pageIndex] || "";
@@ -431,17 +433,17 @@ const Archive = () => {
   const readerProgress = currentPages.length > 0 ? Math.round(((pageIndex + 1) / currentPages.length) * 100) : 0;
 
   return (
-    <div className="min-h-screen bg-background relative">
+    <div className={(retro ? "retro " : "") + "min-h-screen bg-background relative bg-retro"}>
       {/* abstract gradient blobs */}
-      <div className="pointer-events-none absolute -top-24 -right-24 h-72 w-72 rounded-full bg-hero/20 blur-3xl" aria-hidden="true" />
-      <div className="pointer-events-none absolute -bottom-24 -left-24 h-72 w-72 rounded-full bg-hero/10 blur-3xl" aria-hidden="true" />
+      {!retro && <div className="pointer-events-none absolute -top-24 -right-24 h-72 w-72 rounded-full bg-hero/20 blur-3xl" aria-hidden="true" />}
+      {!retro && <div className="pointer-events-none absolute -bottom-24 -left-24 h-72 w-72 rounded-full bg-hero/10 blur-3xl" aria-hidden="true" />}
       <Helmet>
         <title>TheRandoniaArchive</title>
         <meta name="description" content="Simple Minecraft realm book backup for the Randonia community." />
         <link rel="canonical" href="/archive" />
       </Helmet>
 
-      <div className="absolute inset-0 pixel-grid opacity-40 pointer-events-none" aria-hidden="true" />
+      {!retro && <div className="absolute inset-0 pixel-grid opacity-40 pointer-events-none" aria-hidden="true" />}
 
       <header className="sticky top-0 z-10 border-b bg-background/80 backdrop-blur supports-[backdrop-filter]:bg-background/60">
         <div className="container flex h-14 items-center justify-between">
@@ -450,6 +452,10 @@ const Archive = () => {
             <span className="font-semibold">The Randonia Archive</span>
           </div>
           <div className="flex items-center gap-2">
+            <div className="hidden sm:flex items-center gap-2 mr-2">
+              <span className="text-xs text-muted-foreground">Retro</span>
+              <Switch checked={retro} onCheckedChange={setRetro} />
+            </div>
             <Dialog open={open} onOpenChange={setOpen}>
               <DialogTrigger asChild>
                 <Button variant="hero" size="sm" className="gap-1" disabled={supabaseMissing || !canWrite}>
@@ -520,6 +526,11 @@ const Archive = () => {
             </Button>
           </div>
         </div>
+        {retro && (
+          <div className="border-t border-b bg-[#001a33] py-2 text-center text-xs text-[#bde0ff]">
+            Best viewed in <strong>Internet Explorer 4</strong> at 1024×768 • Powered by <span className="retro-pill">Frames</span> & <span className="retro-pill">Tables</span>
+          </div>
+        )}
       </header>
 
       <main className="container py-8">
@@ -533,7 +544,7 @@ const Archive = () => {
             <p className="text-muted-foreground mb-6">Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to load and save books.</p>
           </div>
         ) : (
-          <div className="flex gap-6">
+          <div className={(retro ? "retro-window p-4 " : "") + "flex gap-6"}>
             <aside className="hidden sm:block w-48 shrink-0">
               <div className="sticky top-20 space-y-2">
                 <div className="text-sm font-medium mb-2">Genres</div>
@@ -671,7 +682,7 @@ const Archive = () => {
       {expandedBook && (
         <div className="fixed inset-0 z-20 bg-background/80 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="container h-full py-6">
-            <div className="relative h-full rounded-xl border bg-card shadow-xl overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className={(retro ? "retro-window " : "") + "relative h-full rounded-xl border bg-card shadow-xl overflow-hidden animate-in zoom-in-95 duration-200"}>
               <div className="grid grid-cols-1 lg:grid-cols-3 h-full">
                 {/* left column unchanged (actions with buttons) */}
                 <div className="border-r p-4 space-y-2 bg-background/60 backdrop-blur">
