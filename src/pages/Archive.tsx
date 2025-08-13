@@ -8,7 +8,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "@/context/AuthContext";
 import { toast } from "@/hooks/use-toast";
-import { Plus, LogOut, BookText, X, Pencil, Trash2, ChevronLeft, ChevronRight, Search, Download, Copy } from "lucide-react";
+import { Plus, LogOut, BookText, X, Pencil, Trash2, ChevronLeft, ChevronRight, Search, Download, Copy, Bookmark, BookmarkCheck, Link as LinkIcon, Type } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { DialogDescription } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -107,6 +107,18 @@ function paginate(content: string, approxCharsPerPage: number = 1400): string[] 
   return pages.length ? pages : [text];
 }
 
+function highlight(text: string, q: string) {
+  if (!q) return text;
+  const parts = text.split(new RegExp(`(${q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})`, "ig"));
+  return parts.map((part, i) =>
+    part.toLowerCase() === q.toLowerCase() ? (
+      <mark key={i} className="bg-hero/20 text-foreground rounded px-0.5">{part}</mark>
+    ) : (
+      <span key={i}>{part}</span>
+    )
+  );
+}
+
 const Archive = () => {
   const { user, logout, loading } = useAuth();
   const [books, setBooks] = useState<Book[]>([]);
@@ -126,6 +138,11 @@ const Archive = () => {
   const [editGenre, setEditGenre] = useState<Genre>("Misc");
   const [autoSavedAt, setAutoSavedAt] = useState<string | null>(null);
   const [loadingBooks, setLoadingBooks] = useState(true);
+  const [favorites, setFavorites] = useState<Set<number>>(new Set());
+  const [readerFont, setReaderFont] = useState<number>(() => {
+    const raw = localStorage.getItem("reader:fontSize");
+    return raw ? Number(raw) : 16;
+  });
 
   const currentPages = useMemo(() => paginate(expandedBook?.content_md || ""), [expandedBook]);
   const currentPageText = currentPages[pageIndex] || "";
@@ -157,6 +174,13 @@ const Archive = () => {
   };
 
   useEffect(() => {
+    const raw = localStorage.getItem("favorites");
+    if (raw) {
+      try { setFavorites(new Set(JSON.parse(raw))); } catch {}
+    }
+  }, []);
+
+  useEffect(() => {
     if (!supabase) return;
     if (loading) return;
     fetchBooks();
@@ -179,6 +203,21 @@ const Archive = () => {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [expandedBook, currentPages.length]);
+
+  // Deep-link handling
+  useEffect(() => {
+    if (!books.length) return;
+    const params = new URLSearchParams(window.location.search);
+    const id = params.get("book");
+    if (id) {
+      const found = books.find((b) => String(b.id) === id);
+      if (found) setExpandedBook(found);
+    }
+  }, [books]);
+
+  useEffect(() => {
+    localStorage.setItem("reader:fontSize", String(readerFont));
+  }, [readerFont]);
 
   const pasteFromClipboard = async () => {
     try {
@@ -285,6 +324,13 @@ const Archive = () => {
     toast({ title: "Deleted", description: "Book removed from archive." });
   };
 
+  const toggleFavorite = (id: number) => {
+    const next = new Set(favorites);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    setFavorites(next);
+    localStorage.setItem("favorites", JSON.stringify(Array.from(next)));
+  };
+
   const filteredBooks = useMemo(() => {
     const q = debouncedQuery.trim().toLowerCase();
     return books.filter((b) => {
@@ -296,20 +342,21 @@ const Archive = () => {
     });
   }, [books, debouncedQuery, selectedGenre]);
 
-  const formattedBooks = useMemo(() => filteredBooks.sort((a, b) => b.created_at.localeCompare(a.created_at)), [filteredBooks]);
+  const formattedBooks = useMemo(() => {
+    const list = filteredBooks.slice().sort((a, b) => b.created_at.localeCompare(a.created_at));
+    // Pin favorites to top
+    return list.sort((a, b) => Number(favorites.has(b.id)) - Number(favorites.has(a.id)));
+  }, [filteredBooks, favorites]);
 
   const supabaseMissing = !supabase;
 
   const renderPreview = (b: Book) => {
-    const preview = stripGenreTag(b.summary || b.content_md || "").split(/\r?\n/).slice(0, 8).join("\n");
+    const previewRaw = stripGenreTag(b.summary || b.content_md || "").split(/\r?\n/).slice(0, 8).join("\n");
+    const q = debouncedQuery.trim();
     return (
-      <pre className="text-sm text-muted-foreground overflow-hidden whitespace-pre-wrap max-h-[160px]">{preview || "No preview available."}</pre>
+      <pre className="text-sm text-muted-foreground overflow-hidden whitespace-pre-wrap max-h-[160px]">{q ? highlight(previewRaw, q) : previewRaw}</pre>
     );
   };
-
-  useEffect(() => {
-    setPageIndex(0);
-  }, [expandedBook]);
 
   const copyCurrentPage = async () => {
     try {
@@ -328,6 +375,17 @@ const Archive = () => {
     a.download = `${b.name || "book"}.txt`;
     a.click();
     URL.revokeObjectURL(url);
+  };
+
+  const copyShareLink = async (b: Book) => {
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.set("book", String(b.id));
+      await navigator.clipboard.writeText(url.toString());
+      toast({ title: "Link copied", description: "Share link copied to clipboard." });
+    } catch {
+      toast({ title: "Copy failed", description: "Could not copy link." });
+    }
   };
 
   // Autosave edit drafts locally
@@ -485,21 +543,27 @@ const Archive = () => {
               ) : (
                 <div className="space-y-4">
                   {formattedBooks.map((b) => (
-                    <Card key={b.id} className="hover:shadow-lg transition-all duration-200 hover:-translate-y-0.5 cursor-pointer group" onClick={() => setExpandedBook(b)}>
+                    <Card key={b.id} className="hover:shadow-lg transition-all duration-200 hover:-translate-y-0.5 cursor-pointer group" onClick={() => { setExpandedBook(b); const url = new URL(window.location.href); url.searchParams.set("book", String(b.id)); window.history.replaceState({}, "", url.toString()); }}>
                       <CardHeader>
                         <div className="flex items-center justify-between gap-3">
                           <div>
                             <CardTitle className="truncate">{b.name}</CardTitle>
                             <CardDescription>by {b.author || "Unknown"} • {new Date(b.created_at).toLocaleDateString()}</CardDescription>
-                            <div className="mt-2">
+                            <div className="mt-2 flex items-center gap-2">
                               <span className="inline-flex items-center rounded-full border px-2 py-0.5 text-xs text-muted-foreground bg-background/60">
                                 {deriveGenre(b.summary || "", b.content_md || "")}
                               </span>
+                              <Button size="sm" variant="ghost" className="h-7 px-2" onClick={(e) => { e.stopPropagation(); toggleFavorite(b.id); }}>
+                                {favorites.has(b.id) ? <BookmarkCheck className="h-4 w-4" /> : <Bookmark className="h-4 w-4" />}
+                              </Button>
                             </div>
                           </div>
                           <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
                             <Button size="sm" variant="outline" onClick={() => downloadBook(b)}>
                               <Download className="h-4 w-4" />
+                            </Button>
+                            <Button size="sm" variant="outline" onClick={() => copyShareLink(b)}>
+                              <LinkIcon className="h-4 w-4" />
                             </Button>
                             {(isAdmin || (canWrite && user?.id === b.created_by)) && (
                               <>
@@ -560,6 +624,12 @@ const Archive = () => {
                       </Button>
                       <Button size="sm" variant="outline" onClick={() => downloadBook(expandedBook)}>
                         <Download className="h-4 w-4" /> Export
+                      </Button>
+                      <Button size="sm" variant="outline" onClick={() => copyShareLink(expandedBook)}>
+                        <LinkIcon className="h-4 w-4" /> Share
+                      </Button>
+                      <Button size="sm" variant="outline" onClick={() => { toggleFavorite(expandedBook.id); toast({ title: favorites.has(expandedBook.id) ? "Unfavorited" : "Favorited" }); }}>
+                        {favorites.has(expandedBook.id) ? <BookmarkCheck className="h-4 w-4" /> : <Bookmark className="h-4 w-4" />}
                       </Button>
                     </div>
                   )}
@@ -651,12 +721,16 @@ const Archive = () => {
                     <div className="flex-1 flex flex-col">
                       <div className="flex items-center justify-between border-b px-4 py-2 bg-background/60 backdrop-blur">
                         <div className="flex items-center gap-2">
-                          <Button size="sm" variant="outline" onClick={() => setExpandedBook(null)} aria-label="Close">
+                          <Button size="sm" variant="outline" onClick={() => { setExpandedBook(null); const url = new URL(window.location.href); url.searchParams.delete("book"); window.history.replaceState({}, "", url.toString()); }} aria-label="Close">
                             <X className="h-4 w-4" />
                           </Button>
                           <div className="text-sm text-muted-foreground">Page {pageIndex + 1} / {currentPages.length}</div>
                         </div>
                         <div className="flex items-center gap-2">
+                          <div className="hidden sm:flex items-center gap-1 pr-2 border-r">
+                            <Type className="h-4 w-4" />
+                            <Slider value={[readerFont]} min={12} max={22} step={1} onValueChange={(v) => setReaderFont(v[0] || 16)} className="w-28" />
+                          </div>
                           <Button size="sm" variant="outline" onClick={() => setPageIndex((p) => Math.max(0, p - 1))} disabled={pageIndex === 0}>
                             <ChevronLeft className="h-4 w-4" />
                           </Button>
@@ -672,7 +746,7 @@ const Archive = () => {
                         <Slider value={[pageIndex]} min={0} max={Math.max(0, currentPages.length - 1)} step={1} onValueChange={(v) => setPageIndex(v[0] || 0)} />
                       </div>
                       <div className="flex-1 overflow-auto p-4">
-                        <article className="prose prose-sm max-w-none whitespace-pre-wrap">
+                        <article className="prose prose-sm max-w-none whitespace-pre-wrap" style={{ fontSize: readerFont, lineHeight: 1.6 }}>
                           {currentPageText}
                         </article>
                       </div>
