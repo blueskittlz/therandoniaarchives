@@ -11,6 +11,7 @@ import { toast } from "@/hooks/use-toast";
 import { Plus, LogOut, BookText, X, Pencil, Trash2, ChevronLeft, ChevronRight, Search } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { DialogDescription } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 interface Book {
   id: number;
@@ -26,7 +27,29 @@ const GENRES = ["All", "Adventure", "Fantasy", "History", "Science", "Mystery", 
 
 type Genre = typeof GENRES[number];
 
+const GENRE_TAG_REGEX = /\[genre:\s*([a-zA-Z]+)\]/i;
+
+function extractGenreFromText(text: string): Genre | null {
+  const m = (text || "").match(GENRE_TAG_REGEX);
+  if (!m) return null;
+  const g = m[1].toLowerCase();
+  const found = GENRES.find((x) => x.toLowerCase() === g);
+  return found && found !== "All" ? found : null;
+}
+
+function stripGenreTag(text: string): string {
+  return (text || "").replace(GENRE_TAG_REGEX, "").replace(/^\s*\n/, "").trimStart();
+}
+
+function applyGenreTag(summary: string, genre: Genre): string {
+  const clean = stripGenreTag(summary);
+  const tag = genre && genre !== "Misc" ? `[genre: ${genre}]\n` : "";
+  return `${tag}${clean}`.trimEnd();
+}
+
 function deriveGenre(summary: string, content: string): Genre {
+  const tagged = extractGenreFromText(summary) || extractGenreFromText(content);
+  if (tagged) return tagged;
   const source = `${summary}\n${content}`.toLowerCase();
   if (source.includes("adventure")) return "Adventure";
   if (source.includes("fantasy")) return "Fantasy";
@@ -39,17 +62,47 @@ function deriveGenre(summary: string, content: string): Genre {
   return "Misc";
 }
 
-function paginate(content: string, approxCharsPerPage: number = 900): string[] {
-  const trimmed = content || "";
-  if (!trimmed) return [""];
+function paginate(content: string, approxCharsPerPage: number = 1400): string[] {
+  const text = (content || "").trim();
+  if (!text) return [""];
+  const paragraphs = text.split(/\n{2,}/); // keep paragraphs intact when possible
   const pages: string[] = [];
-  let i = 0;
-  while (i < trimmed.length) {
-    const end = Math.min(i + approxCharsPerPage, trimmed.length);
-    pages.push(trimmed.slice(i, end));
-    i = end;
+  let current = "";
+  for (const p of paragraphs) {
+    if ((current + (current ? "\n\n" : "") + p).length <= approxCharsPerPage) {
+      current = current ? `${current}\n\n${p}` : p;
+      continue;
+    }
+    if (current) {
+      pages.push(current);
+      current = "";
+    }
+    if (p.length <= approxCharsPerPage) {
+      current = p;
+      continue;
+    }
+    // paragraph is too long – split by words without breaking
+    const words = p.split(/\s+/);
+    let chunk = "";
+    for (const w of words) {
+      const next = chunk ? `${chunk} ${w}` : w;
+      if (next.length > approxCharsPerPage) {
+        if (chunk) pages.push(chunk);
+        chunk = w;
+      } else {
+        chunk = next;
+      }
+    }
+    if (chunk) {
+      if (current) {
+        pages.push(current);
+        current = "";
+      }
+      current = chunk;
+    }
   }
-  return pages;
+  if (current) pages.push(current);
+  return pages.length ? pages : [text];
 }
 
 const Archive = () => {
@@ -66,6 +119,8 @@ const Archive = () => {
   const [pageIndex, setPageIndex] = useState(0);
   const [isEditing, setIsEditing] = useState(false);
   const [editDraft, setEditDraft] = useState<{ name: string; summary: string; content_md: string }>({ name: "", summary: "", content_md: "" });
+  const [newGenre, setNewGenre] = useState<Genre>("Misc");
+  const [editGenre, setEditGenre] = useState<Genre>("Misc");
 
   const estimatedPages = useMemo(() => Math.max(1, Math.ceil(content.length / 256)), [content]);
 
@@ -124,7 +179,8 @@ const Archive = () => {
       return;
     }
     const finalTitle = title.trim() || trimmedContent.split(/\r?\n/)[0].slice(0, 48) || "Untitled Book";
-    const summary = trimmedContent.split(/\r?\n/).slice(0, 5).join("\n");
+    const summaryRaw = trimmedContent.split(/\r?\n/).slice(0, 5).join("\n");
+    const summary = applyGenreTag(summaryRaw, newGenre);
 
     if (!supabase) {
       toast({ title: "Supabase not configured", description: "Cannot save without Supabase credentials." });
@@ -151,6 +207,7 @@ const Archive = () => {
 
     setTitle("");
     setContent("");
+    setNewGenre("Misc");
     setOpen(false);
     fetchBooks();
     toast({ title: "Book added", description: `“${finalTitle}” saved (${estimatedPages} page${estimatedPages > 1 ? "s" : ""}).` });
@@ -158,7 +215,8 @@ const Archive = () => {
 
   const tryEdit = (b: Book) => {
     setIsEditing(true);
-    setEditDraft({ name: b.name, summary: b.summary || "", content_md: b.content_md || "" });
+    setEditDraft({ name: b.name, summary: stripGenreTag(b.summary || ""), content_md: b.content_md || "" });
+    setEditGenre(deriveGenre(b.summary || "", b.content_md || ""));
   };
 
   const saveEdit = async () => {
@@ -169,7 +227,7 @@ const Archive = () => {
     }
     const { error } = await supabase!.from("books").update({
       name: editDraft.name,
-      summary: editDraft.summary,
+      summary: applyGenreTag(editDraft.summary, editGenre),
       content_md: editDraft.content_md,
       updated_at: new Date().toISOString(),
     }).eq("id", expandedBook.id);
@@ -177,7 +235,7 @@ const Archive = () => {
       toast({ title: "Error updating book", description: error.message });
       return;
     }
-    setExpandedBook({ ...expandedBook, ...editDraft });
+    setExpandedBook({ ...expandedBook, ...editDraft, summary: applyGenreTag(editDraft.summary, editGenre) });
     setIsEditing(false);
     fetchBooks();
     toast({ title: "Saved", description: "Book updated." });
@@ -214,9 +272,9 @@ const Archive = () => {
   const supabaseMissing = !supabase;
 
   const renderPreview = (b: Book) => {
-    const preview = (b.summary || b.content_md || "").split(/\r?\n/).slice(0, 20).join("\n");
+    const preview = stripGenreTag(b.summary || b.content_md || "").split(/\r?\n/).slice(0, 8).join("\n");
     return (
-      <pre className="text-sm text-muted-foreground overflow-hidden whitespace-pre-wrap max-h-[320px]">{preview || "No preview available."}</pre>
+      <pre className="text-sm text-muted-foreground overflow-hidden whitespace-pre-wrap max-h-[160px]">{preview || "No preview available."}</pre>
     );
   };
 
@@ -259,6 +317,19 @@ const Archive = () => {
                   <div className="space-y-2">
                     <Label htmlFor="title">Title (optional)</Label>
                     <Input id="title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Auto from first line if empty" />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Genre</Label>
+                    <Select value={newGenre} onValueChange={(v) => setNewGenre(v as Genre)}>
+                      <SelectTrigger className="w-full max-w-xs">
+                        <SelectValue placeholder="Select a genre" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {GENRES.filter((g) => g !== "All").map((g) => (
+                          <SelectItem key={g} value={g}>{g}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
                   <div className="space-y-2">
                     <div className="flex items-center justify-between">
@@ -367,9 +438,6 @@ const Archive = () => {
         <div className="fixed inset-0 z-20 bg-background/80 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="container h-full py-6">
             <div className="relative h-full rounded-lg border bg-card shadow-md overflow-hidden animate-in zoom-in-95 duration-200">
-              <button className="absolute right-3 top-3 z-10" onClick={() => setExpandedBook(null)} aria-label="Close">
-                <X className="h-5 w-5" />
-              </button>
               <div className="grid grid-cols-1 lg:grid-cols-3 h-full">
                 <div className="border-r p-4 space-y-2 bg-background/50">
                   <div className="text-sm text-muted-foreground">Title</div>
@@ -381,7 +449,7 @@ const Archive = () => {
                   <div className="text-sm text-muted-foreground">Genre</div>
                   <div>{deriveGenre(expandedBook.summary || "", expandedBook.content_md || "")}</div>
                   <div className="text-sm text-muted-foreground">Description</div>
-                  <pre className="text-sm whitespace-pre-wrap text-muted-foreground max-h-40 overflow-auto">{expandedBook.summary || "No description."}</pre>
+                  <pre className="text-sm whitespace-pre-wrap text-muted-foreground max-h-40 overflow-auto">{stripGenreTag(expandedBook.summary || "") || "No description."}</pre>
 
                   {(isAdmin || (canWrite && user?.id === expandedBook.created_by)) && (
                     <div className="pt-2 flex gap-2">
@@ -403,6 +471,19 @@ const Archive = () => {
                         <Input id="edit-title" value={editDraft.name} onChange={(e) => setEditDraft({ ...editDraft, name: e.target.value })} />
                       </div>
                       <div className="space-y-2">
+                        <Label>Genre</Label>
+                        <Select value={editGenre} onValueChange={(v) => setEditGenre(v as Genre)}>
+                          <SelectTrigger className="w-full max-w-xs">
+                            <SelectValue placeholder="Select a genre" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {GENRES.filter((g) => g !== "All").map((g) => (
+                              <SelectItem key={g} value={g}>{g}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2">
                         <Label htmlFor="edit-summary">Description</Label>
                         <Textarea id="edit-summary" className="min-h-[120px]" value={editDraft.summary} onChange={(e) => setEditDraft({ ...editDraft, summary: e.target.value })} />
                       </div>
@@ -418,7 +499,12 @@ const Archive = () => {
                   ) : (
                     <div className="flex-1 flex flex-col">
                       <div className="flex items-center justify-between border-b px-4 py-2">
-                        <div className="text-sm text-muted-foreground">Page {pageIndex + 1} / {currentPages.length}</div>
+                        <div className="flex items-center gap-2">
+                          <Button size="sm" variant="outline" onClick={() => setExpandedBook(null)} aria-label="Close">
+                            <X className="h-4 w-4" />
+                          </Button>
+                          <div className="text-sm text-muted-foreground">Page {pageIndex + 1} / {currentPages.length}</div>
+                        </div>
                         <div className="flex items-center gap-2">
                           <Button size="sm" variant="outline" onClick={() => setPageIndex((p) => Math.max(0, p - 1))} disabled={pageIndex === 0}>
                             <ChevronLeft className="h-4 w-4" />
