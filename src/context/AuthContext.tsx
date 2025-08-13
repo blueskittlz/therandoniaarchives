@@ -15,9 +15,6 @@ interface AuthContextType {
   signUp: (email: string, password: string) => Promise<void>;
 }
 
-const SESSION_MAX_MS = 1000 * 60 * 60 * 24 * 3; // 3 days
-const SESSION_TS_KEY = "randonia:lastLoginAt";
-
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -40,7 +37,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
 
       if (!existing) {
-        // No profile row visible/available due to RLS or absence; fall back to member locally
         setUser({ id: uid, username: email || "Unknown", role: "member" });
         return;
       }
@@ -48,24 +44,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setUser({ id: uid, username: email || "Unknown", role: existing.role });
     } catch {
       setUser({ id: uid, username: email || "Unknown", role: "member" });
-    }
-  };
-
-  // Enforce 3-day soft expiry: if older than 3 days, sign out on startup and when timer elapses
-  const enforceExpiry = async (loginAtMs?: number | null) => {
-    const now = Date.now();
-    const last = typeof loginAtMs === "number" ? loginAtMs : Number(localStorage.getItem(SESSION_TS_KEY) || 0);
-    if (last && now - last > SESSION_MAX_MS) {
-      await supabase?.auth.signOut();
-      localStorage.removeItem(SESSION_TS_KEY);
-      setUser(null);
-    } else if (last) {
-      const remaining = SESSION_MAX_MS - (now - last);
-      window.setTimeout(async () => {
-        await supabase?.auth.signOut();
-        localStorage.removeItem(SESSION_TS_KEY);
-        setUser(null);
-      }, Math.max(remaining, 0));
     }
   };
 
@@ -80,8 +58,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const { data } = await supabase.auth.getSession();
         const session = data.session;
         if (session?.user) {
-          await getProfile(session.user.id, session.user.email || "");
-          enforceExpiry(null);
+          // set a minimal user immediately; refine after profile fetch
+          setUser({ id: session.user.id, username: session.user.email || "Unknown", role: "member" });
+          getProfile(session.user.id, session.user.email || "").catch(() => undefined);
         }
       } catch {
         // ignore and proceed to login screen
@@ -92,7 +71,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const { data: listener } = supabase.auth.onAuthStateChange(async (_event, session) => {
       if (session?.user) {
-        await getProfile(session.user.id, session.user.email || "");
+        // set a minimal user immediately; refine after profile fetch
+        setUser({ id: session.user.id, username: session.user.email || "Unknown", role: "member" });
+        getProfile(session.user.id, session.user.email || "").catch(() => undefined);
       } else {
         setUser(null);
       }
@@ -125,13 +106,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (error) throw error;
 
     const newUserId = data.user?.id;
-    if (newUserId) {
-      // Rely on first authenticated session to load profile (or fall back to member)
-      if (data.session) {
-        localStorage.setItem(SESSION_TS_KEY, String(Date.now()));
-        await getProfile(newUserId, data.user?.email || "");
-        enforceExpiry(Date.now());
-      }
+    if (newUserId && data.session) {
+      // set minimal user now; refine later
+      setUser({ id: newUserId, username: data.user?.email || "Unknown", role: "member" });
+      getProfile(newUserId, data.user?.email || "").catch(() => undefined);
     }
   };
 
@@ -140,16 +118,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const { data, error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) throw error;
     if (data.user) {
-      localStorage.setItem(SESSION_TS_KEY, String(Date.now()));
-      await getProfile(data.user.id, data.user.email || "");
-      enforceExpiry(Date.now());
+      // set minimal user now; refine later
+      setUser({ id: data.user.id, username: data.user.email || "Unknown", role: "member" });
+      getProfile(data.user.id, data.user.email || "").catch(() => undefined);
     }
   };
 
   const logout = async () => {
     if (!supabase) return;
     await supabase.auth.signOut();
-    localStorage.removeItem(SESSION_TS_KEY);
     setUser(null);
   };
 
