@@ -125,6 +125,7 @@ const Archive = () => {
   const [newGenre, setNewGenre] = useState<Genre>("Misc");
   const [editGenre, setEditGenre] = useState<Genre>("Misc");
   const [autoSavedAt, setAutoSavedAt] = useState<string | null>(null);
+  const [loadingBooks, setLoadingBooks] = useState(true);
 
   const currentPages = useMemo(() => paginate(expandedBook?.content_md || ""), [expandedBook]);
   const currentPageText = currentPages[pageIndex] || "";
@@ -137,6 +138,7 @@ const Archive = () => {
   const fetchBooks = async () => {
     if (!supabase) return;
     try {
+      setLoadingBooks(true);
       const { data, error } = await supabase
         .from("books")
         .select("*")
@@ -149,6 +151,8 @@ const Archive = () => {
       } else {
         toast({ title: "Error loading books", description: err?.message || "Unknown error" });
       }
+    } finally {
+      setLoadingBooks(false);
     }
   };
 
@@ -352,6 +356,9 @@ const Archive = () => {
 
   return (
     <div className="min-h-screen bg-background relative">
+      {/* abstract gradient blobs */}
+      <div className="pointer-events-none absolute -top-24 -right-24 h-72 w-72 rounded-full bg-hero/20 blur-3xl" aria-hidden="true" />
+      <div className="pointer-events-none absolute -bottom-24 -left-24 h-72 w-72 rounded-full bg-hero/10 blur-3xl" aria-hidden="true" />
       <Helmet>
         <title>TheRandoniaArchive</title>
         <meta name="description" content="Simple Minecraft realm book backup for the Randonia community." />
@@ -454,7 +461,7 @@ const Archive = () => {
                 </div>
               </div>
 
-              {formattedBooks.length === 0 ? (
+              {formattedBooks.length === 0 && !loadingBooks ? (
                 <div className="mx-auto max-w-2xl text-center rounded-lg border p-12 bg-card">
                   <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-md bg-hero shadow">
                     <BookText className="h-6 w-6 text-primary-foreground" />
@@ -465,15 +472,30 @@ const Archive = () => {
                     <Plus className="h-4 w-4" /> Add Book
                   </Button>
                 </div>
+              ) : loadingBooks ? (
+                <div className="space-y-4">
+                  {Array.from({ length: 4 }).map((_, i) => (
+                    <div key={i} className="rounded-lg border bg-card p-4 animate-pulse">
+                      <div className="h-4 w-1/3 bg-muted rounded mb-2" />
+                      <div className="h-3 w-2/3 bg-muted rounded mb-3" />
+                      <div className="h-24 w-full bg-muted rounded" />
+                    </div>
+                  ))}
+                </div>
               ) : (
                 <div className="space-y-4">
                   {formattedBooks.map((b) => (
-                    <Card key={b.id} className="hover:shadow-lg transition-shadow cursor-pointer" onClick={() => setExpandedBook(b)}>
+                    <Card key={b.id} className="hover:shadow-lg transition-all duration-200 hover:-translate-y-0.5 cursor-pointer group" onClick={() => setExpandedBook(b)}>
                       <CardHeader>
                         <div className="flex items-center justify-between gap-3">
                           <div>
                             <CardTitle className="truncate">{b.name}</CardTitle>
-                            <CardDescription>by {b.author || "Unknown"} • {new Date(b.created_at).toLocaleDateString()} • {deriveGenre(b.summary || "", b.content_md || "")}</CardDescription>
+                            <CardDescription>by {b.author || "Unknown"} • {new Date(b.created_at).toLocaleDateString()}</CardDescription>
+                            <div className="mt-2">
+                              <span className="inline-flex items-center rounded-full border px-2 py-0.5 text-xs text-muted-foreground bg-background/60">
+                                {deriveGenre(b.summary || "", b.content_md || "")}
+                              </span>
+                            </div>
                           </div>
                           <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
                             <Button size="sm" variant="outline" onClick={() => downloadBook(b)}>
@@ -492,7 +514,11 @@ const Archive = () => {
                           </div>
                         </div>
                       </CardHeader>
-                      <CardContent>{renderPreview(b)}</CardContent>
+                      <CardContent>
+                        <div className="rounded-md border bg-background/40 p-3 transition-colors group-hover:bg-background/60">
+                          {renderPreview(b)}
+                        </div>
+                      </CardContent>
                     </Card>
                   ))}
                 </div>
@@ -505,9 +531,10 @@ const Archive = () => {
       {expandedBook && (
         <div className="fixed inset-0 z-20 bg-background/80 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="container h-full py-6">
-            <div className="relative h-full rounded-lg border bg-card shadow-md overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="relative h-full rounded-xl border bg-card shadow-xl overflow-hidden animate-in zoom-in-95 duration-200">
               <div className="grid grid-cols-1 lg:grid-cols-3 h-full">
-                <div className="border-r p-4 space-y-2 bg-background/50">
+                {/* left info column unchanged except actions */}
+                <div className="border-r p-4 space-y-2 bg-background/60 backdrop-blur">
                   <div className="text-sm text-muted-foreground">Title</div>
                   <div className="font-medium">{expandedBook.name}</div>
                   <div className="text-sm text-muted-foreground">Author</div>
@@ -515,7 +542,11 @@ const Archive = () => {
                   <div className="text-sm text-muted-foreground">Created</div>
                   <div>{new Date(expandedBook.created_at).toLocaleString()}</div>
                   <div className="text-sm text-muted-foreground">Genre</div>
-                  <div>{deriveGenre(expandedBook.summary || "", expandedBook.content_md || "")}</div>
+                  <div>
+                    <span className="inline-flex items-center rounded-full border px-2 py-0.5 text-xs text-muted-foreground bg-background/60">
+                      {deriveGenre(expandedBook.summary || "", expandedBook.content_md || "")}
+                    </span>
+                  </div>
                   <div className="text-sm text-muted-foreground">Description</div>
                   <pre className="text-sm whitespace-pre-wrap text-muted-foreground max-h-40 overflow-auto">{stripGenreTag(expandedBook.summary || "") || "No description."}</pre>
 
@@ -540,6 +571,7 @@ const Archive = () => {
                 <div className="lg:col-span-2 flex flex-col h-full">
                   {isEditing ? (
                     <div className="p-4 space-y-3 overflow-auto">
+                      {/* fields */}
                       <div className="space-y-2">
                         <Label htmlFor="edit-title">Title</Label>
                         <Input id="edit-title" value={editDraft.name} onChange={(e) => setEditDraft({ ...editDraft, name: e.target.value })} />
@@ -563,7 +595,7 @@ const Archive = () => {
                       </div>
                       <div className="space-y-2">
                         <Label htmlFor="edit-content">Content</Label>
-                        <div className="border rounded-md">
+                        <div className="rounded-md overflow-hidden border bg-background/50">
                           <Editor
                             height="360px"
                             defaultLanguage="markdown"
@@ -572,9 +604,40 @@ const Archive = () => {
                             options={{
                               wordWrap: "on",
                               minimap: { enabled: false },
-                              folding: true,
+                              folding: false,
+                              glyphMargin: false,
+                              lineNumbers: "off",
+                              renderLineHighlight: "none",
+                              overviewRulerLanes: 0,
+                              scrollBeyondLastLine: false,
+                              smoothScrolling: true,
+                              fontSize: 14,
+                              lineHeight: 22,
+                              padding: { top: 12, bottom: 12 },
                               scrollbar: { alwaysConsumeMouseWheel: false },
                               renderWhitespace: "selection",
+                            }}
+                            theme="vs-dark"
+                            onMount={(editor, monaco) => {
+                              try {
+                                monaco.editor.defineTheme("randonia-dark", {
+                                  base: "vs-dark",
+                                  inherit: true,
+                                  rules: [],
+                                  colors: {
+                                    "editor.background": "#0b1220",
+                                    "editor.foreground": "#d1d5db",
+                                    "editorCursor.foreground": "#93c5fd",
+                                    "editorLineNumber.foreground": "#475569",
+                                    "editorLineNumber.activeForeground": "#94a3b8",
+                                    "editor.selectionBackground": "#1e293b88",
+                                    "editor.inactiveSelectionBackground": "#0f172a66",
+                                    "editorIndentGuide.background": "#1f2937",
+                                    "editorIndentGuide.activeBackground": "#334155",
+                                  },
+                                });
+                                monaco.editor.setTheme("randonia-dark");
+                              } catch {}
                             }}
                           />
                         </div>
@@ -586,7 +649,7 @@ const Archive = () => {
                     </div>
                   ) : (
                     <div className="flex-1 flex flex-col">
-                      <div className="flex items-center justify-between border-b px-4 py-2">
+                      <div className="flex items-center justify-between border-b px-4 py-2 bg-background/60 backdrop-blur">
                         <div className="flex items-center gap-2">
                           <Button size="sm" variant="outline" onClick={() => setExpandedBook(null)} aria-label="Close">
                             <X className="h-4 w-4" />
