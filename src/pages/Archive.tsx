@@ -10,6 +10,7 @@ import { useAuth } from "@/context/AuthContext";
 import { toast } from "@/hooks/use-toast";
 import { Plus, LogOut, BookText } from "lucide-react";
 import { supabase } from "@/lib/supabase";
+import { DialogDescription } from "@/components/ui/dialog";
 
 interface Book {
   id: number;
@@ -132,6 +133,7 @@ const Archive = () => {
               <DialogContent className="sm:max-w-[720px]">
                 <DialogHeader>
                   <DialogTitle>Add a new book</DialogTitle>
+                  <DialogDescription>Paste or import the book content and save it to your archive.</DialogDescription>
                 </DialogHeader>
                 <div className="space-y-4">
                   <div className="space-y-2">
