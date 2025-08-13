@@ -75,14 +75,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return;
     }
 
-    supabase.auth.getSession().then(async ({ data }) => {
-      const session = data.session;
-      if (session?.user) {
-        await getProfile(session.user.id, session.user.email || "");
-        enforceExpiry(null);
+    (async () => {
+      try {
+        const { data } = await supabase.auth.getSession();
+        const session = data.session;
+        if (session?.user) {
+          await getProfile(session.user.id, session.user.email || "");
+          enforceExpiry(null);
+        }
+      } catch {
+        // ignore and proceed to login screen
+      } finally {
+        setLoading(false);
       }
-      setLoading(false);
-    });
+    })();
 
     const { data: listener } = supabase.auth.onAuthStateChange(async (_event, session) => {
       if (session?.user) {
