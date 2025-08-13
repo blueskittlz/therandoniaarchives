@@ -3,30 +3,36 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useAuth } from "@/context/AuthContext";
 import { useNavigate, Link } from "react-router-dom";
 import { toast } from "@/hooks/use-toast";
 import { supabase } from "@/lib/supabase";
 
 const Login = () => {
-  const { login } = useAuth();
+  const { login, user, loading } = useAuth();
   const navigate = useNavigate();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [formLoading, setFormLoading] = useState(false);
+
+  useEffect(() => {
+    if (!loading && user) {
+      navigate("/archive", { replace: true });
+    }
+  }, [user, loading]);
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      setLoading(true);
+      setFormLoading(true);
       await login(email.trim(), password);
       toast({ title: "Welcome back", description: `Logged in as ${email}` });
       navigate("/archive", { replace: true });
     } catch (err: any) {
       toast({ title: "Login failed", description: err?.message ?? "Unknown error" });
     } finally {
-      setLoading(false);
+      setFormLoading(false);
     }
   };
 
@@ -67,8 +73,8 @@ const Login = () => {
                     <Label htmlFor="password">Password</Label>
                     <Input id="password" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" required />
                   </div>
-                  <Button type="submit" variant="hero" className="w-full" disabled={loading}>
-                    {loading ? "Logging in..." : "Login"}
+                  <Button type="submit" variant="hero" className="w-full" disabled={formLoading}>
+                    {formLoading ? "Logging in..." : "Login"}
                   </Button>
                   <p className="text-xs text-muted-foreground text-center">
                     Don&apos;t have an account? <Link to="/signup" className="underline">Create one</Link>.
