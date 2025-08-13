@@ -16,6 +16,7 @@ import { Slider } from "@/components/ui/slider";
 import Editor from "@monaco-editor/react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Switch } from "@/components/ui/switch";
+import { Dialog as BaseDialog } from "@/components/ui/dialog";
 
 interface Book {
   id: number;
@@ -149,6 +150,7 @@ const Archive = () => {
   const [onlyFavorites, setOnlyFavorites] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
   const [retro, setRetro] = useState(false);
+  const [snakeOpen, setSnakeOpen] = useState(false);
 
   const currentPages = useMemo(() => paginate(expandedBook?.content_md || ""), [expandedBook]);
   const currentPageText = currentPages[pageIndex] || "";
@@ -432,6 +434,103 @@ const Archive = () => {
 
   const readerProgress = currentPages.length > 0 ? Math.round(((pageIndex + 1) / currentPages.length) * 100) : 0;
 
+  // Retro Snake game component (inline, simple canvas)
+  const SnakeGame: React.FC<{ open: boolean; onClose: () => void }> = ({ open, onClose }) => {
+    const canvasRef = useRef<HTMLCanvasElement | null>(null);
+    const rafRef = useRef<number | null>(null);
+    const dirRef = useRef<[number, number]>([1, 0]);
+    const snakeRef = useRef<Array<[number, number]>>([[8, 8]]);
+    const appleRef = useRef<[number, number]>([12, 8]);
+    const lastTickRef = useRef(0);
+    const grid = 16; // 16x16
+    const speedMs = 120;
+
+    useEffect(() => {
+      if (!open) return;
+      const onKey = (e: KeyboardEvent) => {
+        if (e.key === "Escape") onClose();
+        if (e.key === "ArrowUp" && dirRef.current[1] !== 1) dirRef.current = [0, -1];
+        if (e.key === "ArrowDown" && dirRef.current[1] !== -1) dirRef.current = [0, 1];
+        if (e.key === "ArrowLeft" && dirRef.current[0] !== 1) dirRef.current = [-1, 0];
+        if (e.key === "ArrowRight" && dirRef.current[0] !== -1) dirRef.current = [1, 0];
+      };
+      window.addEventListener("keydown", onKey);
+      return () => window.removeEventListener("keydown", onKey);
+    }, [open]);
+
+    useEffect(() => {
+      if (!open || !canvasRef.current) return;
+      const ctx = canvasRef.current.getContext("2d");
+      if (!ctx) return;
+      ctx.imageSmoothingEnabled = false;
+
+      const reset = () => {
+        snakeRef.current = [[8, 8]];
+        dirRef.current = [1, 0];
+        appleRef.current = [12, 8];
+      };
+
+      const placeApple = () => {
+        appleRef.current = [Math.floor(Math.random() * grid), Math.floor(Math.random() * grid)];
+      };
+
+      const tick = (ts: number) => {
+        if (!lastTickRef.current) lastTickRef.current = ts;
+        const delta = ts - lastTickRef.current;
+        if (delta >= speedMs) {
+          lastTickRef.current = ts;
+          const [dx, dy] = dirRef.current;
+          const [hx, hy] = snakeRef.current[0];
+          let nx = (hx + dx + grid) % grid;
+          let ny = (hy + dy + grid) % grid;
+          const newHead: [number, number] = [nx, ny];
+          const hit = snakeRef.current.some(([x, y]) => x === nx && y === ny);
+          if (hit) reset();
+          snakeRef.current = [newHead, ...snakeRef.current];
+          if (nx === appleRef.current[0] && ny === appleRef.current[1]) placeApple(); else snakeRef.current.pop();
+        }
+
+        // draw
+        ctx.fillStyle = "#001226";
+        ctx.fillRect(0, 0, 256, 256);
+        // grid dots
+        ctx.fillStyle = "#0a203f";
+        for (let i = 0; i < grid; i++) {
+          for (let j = 0; j < grid; j++) {
+            ctx.fillRect(i * 16 + 7, j * 16 + 7, 2, 2);
+          }
+        }
+        // apple
+        ctx.fillStyle = "#34d399";
+        ctx.fillRect(appleRef.current[0] * 16, appleRef.current[1] * 16, 16, 16);
+        // snake
+        ctx.fillStyle = "#93c5fd";
+        snakeRef.current.forEach(([x, y]) => ctx.fillRect(x * 16, y * 16, 16, 16));
+
+        rafRef.current = requestAnimationFrame(tick);
+      };
+
+      rafRef.current = requestAnimationFrame(tick);
+      return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); };
+    }, [open]);
+
+    if (!open) return null;
+    return (
+      <div className="fixed inset-0 z-[60] bg-[#000814]/80 backdrop-blur-sm flex items-center justify-center">
+        <div className="retro-window p-3 w-[320px]">
+          <div className="flex items-center justify-between mb-2">
+            <div className="retro-title text-sm">SNAKE.EXE</div>
+            <Button size="sm" variant="outline" onClick={onClose}>Close</Button>
+          </div>
+          <div className="border border-[#3b5b92] bg-[#001226] p-2">
+            <canvas ref={canvasRef} width={256} height={256} style={{ imageRendering: "pixelated", width: "100%", height: "100%" }} />
+          </div>
+          <div className="text-[10px] text-[#a3bffa] mt-2">Arrow keys to move. Don’t bite yourself.</div>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className={(retro ? "retro " : "") + "min-h-screen bg-background relative bg-retro"}>
       {/* abstract gradient blobs */}
@@ -444,6 +543,10 @@ const Archive = () => {
       </Helmet>
 
       {!retro && <div className="absolute inset-0 pixel-grid opacity-40 pointer-events-none" aria-hidden="true" />}
+      {retro && <div className="crt-overlay" aria-hidden="true" />}
+
+      {/* tiny easter-egg pixel */}
+      <div className="easter-pixel" onClick={() => setSnakeOpen(true)} title=" " />
 
       <header className="sticky top-0 z-10 border-b bg-background/80 backdrop-blur supports-[backdrop-filter]:bg-background/60">
         <div className="container flex h-14 items-center justify-between">
@@ -865,6 +968,7 @@ const Archive = () => {
           </div>
         </div>
       )}
+      <SnakeGame open={snakeOpen} onClose={() => setSnakeOpen(false)} />
     </div>
   );
 };
