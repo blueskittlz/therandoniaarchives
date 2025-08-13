@@ -23,18 +23,37 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const getProfile = async (uid: string, email: string) => {
     if (!supabase) throw new Error("Supabase not configured");
-    const { data, error } = await supabase
+
+    // Try to read existing profile
+    const { data: existing, error: selectError } = await supabase
       .from("profiles")
       .select("id, role")
       .eq("id", uid)
-      .single();
-    if (error) throw error;
+      .maybeSingle();
 
-    setUser({
-      id: uid,
-      username: email || "Unknown",
-      role: data.role,
-    });
+    if (selectError) throw selectError;
+
+    // If profile is missing, attempt to create a default one for the current user
+    if (!existing) {
+      const { data: created, error: upsertError } = await supabase
+        .from("profiles")
+        .upsert({ id: uid, role: "member" }, { onConflict: "id" })
+        .select("id, role")
+        .single();
+
+      if (upsertError) {
+        // eslint-disable-next-line no-console
+        console.warn("Profile upsert failed (RLS may block before first login confirm):", upsertError.message);
+        // Fallback to local user with default role so app works even if profile row missing
+        setUser({ id: uid, username: email || "Unknown", role: "member" });
+        return;
+      }
+
+      setUser({ id: uid, username: email || "Unknown", role: created.role });
+      return;
+    }
+
+    setUser({ id: uid, username: email || "Unknown", role: existing.role });
   };
 
   useEffect(() => {
@@ -75,20 +94,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     });
     if (error) throw error;
 
-    // Create a default profile entry with role 'member'
     const newUserId = data.user?.id;
     if (newUserId) {
-      // Use upsert to avoid duplicates if there is a trigger
-      const { error: profileError } = await supabase
-        .from("profiles")
-        .upsert({ id: newUserId, role: "member" }, { onConflict: "id" });
-      if (profileError) {
-        // eslint-disable-next-line no-console
-        console.warn("Failed to upsert profile:", profileError.message);
-      }
-
-      // If we already have a session (email confirm not required), load profile
+      // Try to create profile if a session exists; otherwise first login will create it
       if (data.session) {
+        const { error: profileError } = await supabase
+          .from("profiles")
+          .upsert({ id: newUserId, role: "member" }, { onConflict: "id" });
+        if (profileError) {
+          // eslint-disable-next-line no-console
+          console.warn("Failed to upsert profile on sign-up:", profileError.message);
+        }
         await getProfile(newUserId, data.user?.email || "");
       }
     }
