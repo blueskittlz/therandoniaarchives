@@ -109,6 +109,37 @@ All colors MUST be HSL.
   body {
     @apply bg-background text-foreground;
     font-family: "Outfit", system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, "Noto Sans", "Helvetica Neue", Arial, "Apple Color Emoji", "Segoe UI Emoji";
+    scroll-behavior: smooth;
+  }
+
+  /* Modern thin scrollbars (WebKit) */
+  *::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  *::-webkit-scrollbar-track {
+    background: hsl(var(--background));
+    border-left: 1px solid hsl(var(--border));
+  }
+  *::-webkit-scrollbar-thumb {
+    background: hsl(215 20% 20% / 0.7);
+    border: 2px solid hsl(var(--background));
+    border-radius: 999px;
+  }
+  *::-webkit-scrollbar-thumb:hover {
+    background: hsl(215 20% 25% / 0.9);
+  }
+
+  /* Firefox */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(215 20% 25%) hsl(var(--background));
+  }
+
+  /* Softer focus rings */
+  :focus-visible {
+    outline: 2px solid hsl(var(--ring) / 0.6);
+    outline-offset: 2px;
   }
 }
 
