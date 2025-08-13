@@ -8,10 +8,12 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "@/context/AuthContext";
 import { toast } from "@/hooks/use-toast";
-import { Plus, LogOut, BookText, X, Pencil, Trash2, ChevronLeft, ChevronRight, Search } from "lucide-react";
+import { Plus, LogOut, BookText, X, Pencil, Trash2, ChevronLeft, ChevronRight, Search, Download, Copy } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { DialogDescription } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Slider } from "@/components/ui/slider";
+import Editor from "@monaco-editor/react";
 
 interface Book {
   id: number;
@@ -114,6 +116,7 @@ const Archive = () => {
   const fileRef = useRef<HTMLInputElement>(null);
 
   const [searchQuery, setSearchQuery] = useState("");
+  const [debouncedQuery, setDebouncedQuery] = useState("");
   const [selectedGenre, setSelectedGenre] = useState<Genre>("All");
   const [expandedBook, setExpandedBook] = useState<Book | null>(null);
   const [pageIndex, setPageIndex] = useState(0);
@@ -121,6 +124,10 @@ const Archive = () => {
   const [editDraft, setEditDraft] = useState<{ name: string; summary: string; content_md: string }>({ name: "", summary: "", content_md: "" });
   const [newGenre, setNewGenre] = useState<Genre>("Misc");
   const [editGenre, setEditGenre] = useState<Genre>("Misc");
+  const [autoSavedAt, setAutoSavedAt] = useState<string | null>(null);
+
+  const currentPages = useMemo(() => paginate(expandedBook?.content_md || ""), [expandedBook]);
+  const currentPageText = currentPages[pageIndex] || "";
 
   const estimatedPages = useMemo(() => Math.max(1, Math.ceil(content.length / 256)), [content]);
 
@@ -150,6 +157,24 @@ const Archive = () => {
     if (loading) return;
     fetchBooks();
   }, [loading]);
+
+  // Debounce search input for smoother filtering
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedQuery(searchQuery), 200);
+    return () => clearTimeout(t);
+  }, [searchQuery]);
+
+  // Keyboard navigation in reader
+  useEffect(() => {
+    if (!expandedBook) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setExpandedBook(null);
+      if (e.key === "ArrowLeft") setPageIndex((p) => Math.max(0, p - 1));
+      if (e.key === "ArrowRight") setPageIndex((p) => Math.min(currentPages.length - 1, p + 1));
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [expandedBook, currentPages.length]);
 
   const pasteFromClipboard = async () => {
     try {
@@ -257,7 +282,7 @@ const Archive = () => {
   };
 
   const filteredBooks = useMemo(() => {
-    const q = searchQuery.trim().toLowerCase();
+    const q = debouncedQuery.trim().toLowerCase();
     return books.filter((b) => {
       const genre = deriveGenre(b.summary || "", b.content_md || "");
       const genreOk = selectedGenre === "All" || genre === selectedGenre;
@@ -265,7 +290,7 @@ const Archive = () => {
       const hay = `${b.name}\n${b.author}\n${b.summary}\n${b.content_md}`.toLowerCase();
       return genreOk && hay.includes(q);
     });
-  }, [books, searchQuery, selectedGenre]);
+  }, [books, debouncedQuery, selectedGenre]);
 
   const formattedBooks = useMemo(() => filteredBooks.sort((a, b) => b.created_at.localeCompare(a.created_at)), [filteredBooks]);
 
@@ -278,11 +303,51 @@ const Archive = () => {
     );
   };
 
-  const currentPages = useMemo(() => paginate(expandedBook?.content_md || ""), [expandedBook]);
-  const currentPageText = currentPages[pageIndex] || "";
-
   useEffect(() => {
     setPageIndex(0);
+  }, [expandedBook]);
+
+  const copyCurrentPage = async () => {
+    try {
+      await navigator.clipboard.writeText(currentPageText);
+      toast({ title: "Copied", description: "Current page copied to clipboard." });
+    } catch {
+      toast({ title: "Copy failed", description: "Could not copy to clipboard." });
+    }
+  };
+
+  const downloadBook = (b: Book) => {
+    const blob = new Blob([b.content_md || ""], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${b.name || "book"}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  // Autosave edit drafts locally
+  useEffect(() => {
+    if (!isEditing || !expandedBook) return;
+    const key = `draft:${expandedBook.id}`;
+    const t = setTimeout(() => {
+      localStorage.setItem(key, JSON.stringify({ ...editDraft, genre: editGenre }));
+      setAutoSavedAt(new Date().toLocaleTimeString());
+    }, 500);
+    return () => clearTimeout(t);
+  }, [isEditing, expandedBook, editDraft, editGenre]);
+
+  useEffect(() => {
+    if (!expandedBook) return;
+    const key = `draft:${expandedBook.id}`;
+    const raw = localStorage.getItem(key);
+    if (raw) {
+      try {
+        const parsed = JSON.parse(raw);
+        setEditDraft({ name: parsed.name ?? editDraft.name, summary: parsed.summary ?? editDraft.summary, content_md: parsed.content_md ?? editDraft.content_md });
+        if (parsed.genre) setEditGenre(parsed.genre);
+      } catch {}
+    }
   }, [expandedBook]);
 
   return (
@@ -410,21 +475,24 @@ const Archive = () => {
                             <CardTitle className="truncate">{b.name}</CardTitle>
                             <CardDescription>by {b.author || "Unknown"} • {new Date(b.created_at).toLocaleDateString()} • {deriveGenre(b.summary || "", b.content_md || "")}</CardDescription>
                           </div>
-                          {(isAdmin || (canWrite && user?.id === b.created_by)) && (
-                            <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-                              <Button size="sm" variant="outline" onClick={() => { setExpandedBook(b); tryEdit(b); }}>
-                                <Pencil className="h-4 w-4" />
-                              </Button>
-                              <Button size="sm" variant="destructive" onClick={() => deleteBook(b)}>
-                                <Trash2 className="h-4 w-4" />
-                              </Button>
-                            </div>
-                          )}
+                          <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                            <Button size="sm" variant="outline" onClick={() => downloadBook(b)}>
+                              <Download className="h-4 w-4" />
+                            </Button>
+                            {(isAdmin || (canWrite && user?.id === b.created_by)) && (
+                              <>
+                                <Button size="sm" variant="outline" onClick={() => { setExpandedBook(b); tryEdit(b); }}>
+                                  <Pencil className="h-4 w-4" />
+                                </Button>
+                                <Button size="sm" variant="destructive" onClick={() => deleteBook(b)}>
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              </>
+                            )}
+                          </div>
                         </div>
                       </CardHeader>
-                      <CardContent>
-                        {renderPreview(b)}
-                      </CardContent>
+                      <CardContent>{renderPreview(b)}</CardContent>
                     </Card>
                   ))}
                 </div>
@@ -452,14 +520,20 @@ const Archive = () => {
                   <pre className="text-sm whitespace-pre-wrap text-muted-foreground max-h-40 overflow-auto">{stripGenreTag(expandedBook.summary || "") || "No description."}</pre>
 
                   {(isAdmin || (canWrite && user?.id === expandedBook.created_by)) && (
-                    <div className="pt-2 flex gap-2">
+                    <div className="pt-2 flex flex-wrap gap-2">
                       <Button size="sm" variant="outline" onClick={() => tryEdit(expandedBook)}>
                         <Pencil className="h-4 w-4" /> Edit
                       </Button>
                       <Button size="sm" variant="destructive" onClick={() => deleteBook(expandedBook)}>
                         <Trash2 className="h-4 w-4" /> Delete
                       </Button>
+                      <Button size="sm" variant="outline" onClick={() => downloadBook(expandedBook)}>
+                        <Download className="h-4 w-4" /> Export
+                      </Button>
                     </div>
+                  )}
+                  {isEditing && autoSavedAt && (
+                    <div className="text-xs text-muted-foreground">Draft autosaved at {autoSavedAt}</div>
                   )}
                 </div>
 
@@ -489,7 +563,21 @@ const Archive = () => {
                       </div>
                       <div className="space-y-2">
                         <Label htmlFor="edit-content">Content</Label>
-                        <Textarea id="edit-content" className="min-h-[260px]" value={editDraft.content_md} onChange={(e) => setEditDraft({ ...editDraft, content_md: e.target.value })} />
+                        <div className="border rounded-md">
+                          <Editor
+                            height="360px"
+                            defaultLanguage="markdown"
+                            value={editDraft.content_md}
+                            onChange={(v) => setEditDraft({ ...editDraft, content_md: v || "" })}
+                            options={{
+                              wordWrap: "on",
+                              minimap: { enabled: false },
+                              folding: true,
+                              scrollbar: { alwaysConsumeMouseWheel: false },
+                              renderWhitespace: "selection",
+                            }}
+                          />
+                        </div>
                       </div>
                       <div className="flex gap-2 justify-end">
                         <Button variant="secondary" onClick={() => setIsEditing(false)}>Cancel</Button>
@@ -512,7 +600,13 @@ const Archive = () => {
                           <Button size="sm" variant="outline" onClick={() => setPageIndex((p) => Math.min(currentPages.length - 1, p + 1))} disabled={pageIndex >= currentPages.length - 1}>
                             <ChevronRight className="h-4 w-4" />
                           </Button>
+                          <Button size="sm" variant="outline" onClick={copyCurrentPage}>
+                            <Copy className="h-4 w-4" />
+                          </Button>
                         </div>
+                      </div>
+                      <div className="px-4 py-2">
+                        <Slider value={[pageIndex]} min={0} max={Math.max(0, currentPages.length - 1)} step={1} onValueChange={(v) => setPageIndex(v[0] || 0)} />
                       </div>
                       <div className="flex-1 overflow-auto p-4">
                         <article className="prose prose-sm max-w-none whitespace-pre-wrap">
