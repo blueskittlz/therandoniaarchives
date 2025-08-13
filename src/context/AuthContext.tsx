@@ -24,36 +24,28 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const getProfile = async (uid: string, email: string) => {
     if (!supabase) throw new Error("Supabase not configured");
 
-    // Try to read existing profile
-    const { data: existing, error: selectError } = await supabase
-      .from("profiles")
-      .select("id, role")
-      .eq("id", uid)
-      .maybeSingle();
-
-    if (selectError) throw selectError;
-
-    // If profile is missing, attempt to create a default one for the current user
-    if (!existing) {
-      const { data: created, error: upsertError } = await supabase
+    try {
+      const { data: existing, error: selectError } = await supabase
         .from("profiles")
-        .upsert({ id: uid, role: "member" }, { onConflict: "id" })
         .select("id, role")
-        .single();
+        .eq("id", uid)
+        .maybeSingle();
 
-      if (upsertError) {
-        // eslint-disable-next-line no-console
-        console.warn("Profile upsert failed (RLS may block before first login confirm):", upsertError.message);
-        // Fallback to local user with default role so app works even if profile row missing
+      if (selectError) {
         setUser({ id: uid, username: email || "Unknown", role: "member" });
         return;
       }
 
-      setUser({ id: uid, username: email || "Unknown", role: created.role });
-      return;
-    }
+      if (!existing) {
+        // No profile row visible/available due to RLS or absence; fall back to member locally
+        setUser({ id: uid, username: email || "Unknown", role: "member" });
+        return;
+      }
 
-    setUser({ id: uid, username: email || "Unknown", role: existing.role });
+      setUser({ id: uid, username: email || "Unknown", role: existing.role });
+    } catch {
+      setUser({ id: uid, username: email || "Unknown", role: "member" });
+    }
   };
 
   useEffect(() => {
@@ -65,14 +57,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     supabase.auth.getSession().then(({ data }) => {
       const session = data.session;
       if (session?.user) {
-        getProfile(session.user.id, session.user.email || "").catch(console.error);
+        getProfile(session.user.id, session.user.email || "").catch(() => {
+          setUser({ id: session.user!.id, username: session.user!.email || "Unknown", role: "member" });
+        });
       }
       setLoading(false);
     });
 
     const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
       if (session?.user) {
-        getProfile(session.user.id, session.user.email || "").catch(console.error);
+        getProfile(session.user.id, session.user.email || "").catch(() => {
+          setUser({ id: session.user!.id, username: session.user!.email || "Unknown", role: "member" });
+        });
       } else {
         setUser(null);
       }
@@ -96,15 +92,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const newUserId = data.user?.id;
     if (newUserId) {
-      // Try to create profile if a session exists; otherwise first login will create it
+      // Rely on first authenticated session to load profile (or fall back to member)
       if (data.session) {
-        const { error: profileError } = await supabase
-          .from("profiles")
-          .upsert({ id: newUserId, role: "member" }, { onConflict: "id" });
-        if (profileError) {
-          // eslint-disable-next-line no-console
-          console.warn("Failed to upsert profile on sign-up:", profileError.message);
-        }
         await getProfile(newUserId, data.user?.email || "");
       }
     }

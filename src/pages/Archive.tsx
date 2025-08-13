@@ -22,7 +22,7 @@ interface Book {
 }
 
 const Archive = () => {
-  const { user, logout } = useAuth();
+  const { user, logout, loading } = useAuth();
   const [books, setBooks] = useState<Book[]>([]);
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState("");
@@ -31,22 +31,32 @@ const Archive = () => {
 
   const estimatedPages = useMemo(() => Math.max(1, Math.ceil(content.length / 256)), [content]);
 
+  const canWrite = user?.role === "admin" || user?.role === "author";
+
   const fetchBooks = async () => {
     if (!supabase) return;
-    const { data, error } = await supabase
-      .from("books")
-      .select("*")
-      .order("created_at", { ascending: false });
-    if (error) {
-      toast({ title: "Error loading books", description: error.message });
-      return;
+    try {
+      const { data, error } = await supabase
+        .from("books")
+        .select("*")
+        .order("created_at", { ascending: false });
+      if (error) throw error;
+      setBooks(data || []);
+    } catch (err: any) {
+      if (err?.code === "PGRST301" || err?.message?.includes("row-level security") || err?.status === 403) {
+        toast({ title: "Restricted", description: "You must be signed in to view the archive." });
+      } else {
+        toast({ title: "Error loading books", description: err?.message || "Unknown error" });
+      }
     }
-    setBooks(data || []);
   };
 
   useEffect(() => {
+    if (!supabase) return;
+    // If reads require auth, wait until auth state is resolved
+    if (loading) return;
     fetchBooks();
-  }, []);
+  }, [loading]);
 
   const pasteFromClipboard = async () => {
     try {
@@ -80,6 +90,11 @@ const Archive = () => {
 
     if (!supabase) {
       toast({ title: "Supabase not configured", description: "Cannot save without Supabase credentials." });
+      return;
+    }
+
+    if (!canWrite) {
+      toast({ title: "Insufficient permissions", description: "Only authors or admins can add books." });
       return;
     }
 
@@ -126,7 +141,7 @@ const Archive = () => {
           <div className="flex items-center gap-2">
             <Dialog open={open} onOpenChange={setOpen}>
               <DialogTrigger asChild>
-                <Button variant="hero" size="sm" className="gap-1" disabled={supabaseMissing}>
+                <Button variant="hero" size="sm" className="gap-1" disabled={supabaseMissing || !canWrite}>
                   <Plus className="h-4 w-4" /> Add Book
                 </Button>
               </DialogTrigger>
@@ -154,7 +169,7 @@ const Archive = () => {
                   </div>
                   <div className="flex justify-end gap-2">
                     <Button variant="secondary" onClick={() => setOpen(false)}>Cancel</Button>
-                    <Button onClick={addBook} disabled={supabaseMissing}>Save</Button>
+                    <Button onClick={addBook} disabled={supabaseMissing || !canWrite}>Save</Button>
                   </div>
                 </div>
               </DialogContent>
@@ -183,7 +198,7 @@ const Archive = () => {
             </div>
             <h1 className="text-2xl font-semibold mb-2">The Archive Is Empty</h1>
             <p className="text-muted-foreground mb-6">Be the first person to write/backup to the archive!</p>
-            <Button variant="hero" onClick={() => setOpen(true)} className="gap-1">
+            <Button variant="hero" onClick={() => setOpen(true)} className="gap-1" disabled={!canWrite}>
               <Plus className="h-4 w-4" /> Add Book
             </Button>
           </div>
