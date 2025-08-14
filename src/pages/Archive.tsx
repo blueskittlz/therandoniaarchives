@@ -789,15 +789,68 @@ const Archive = () => {
                               lineNumbersMinChars: 0,
                               scrollBeyondLastLine: false,
                               automaticLayout: true,
-                              fontSize: 14,
-                              fontFamily: "ui-monospace, SFMono-Regular, 'SF Mono', Consolas, 'Liberation Mono', Menlo, monospace",
-                              theme: "vs-dark"
+                              fontSize: 16,
+                              fontFamily: "ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif",
+                              theme: "vs",
+                              renderLineHighlight: "none",
+                              overviewRulerBorder: false,
+                              hideCursorInOverviewRuler: true,
+                              scrollbar: {
+                                vertical: "visible",
+                                horizontal: "visible",
+                                verticalScrollbarSize: 8,
+                                horizontalScrollbarSize: 8,
+                                useShadows: false
+                              },
+                              padding: { top: 16, bottom: 16 },
+                              lineHeight: 24,
+                              cursorBlinking: "smooth",
+                              cursorSmoothCaretAnimation: "on",
+                              smoothScrolling: true,
+                              mouseWheelScrollSensitivity: 1,
+                              bracketPairColorization: { enabled: false },
+                              guides: {
+                                bracketPairs: false,
+                                indentation: false
+                              },
+                                                           quickSuggestions: false,
+                             parameterHints: { enabled: false },
+                             hover: { enabled: false },
+                             contextmenu: false,
+                             find: { addExtraSpaceOnTop: false },
+                             links: false,
+                             colorDecorators: false,
+                             formatOnPaste: false,
+                             formatOnType: false,
+                             suggestOnTriggerCharacters: false,
+                             acceptSuggestionOnCommitCharacter: false,
+                             acceptSuggestionOnEnter: "off",
+                             tabCompletion: "off",
+                             wordBasedSuggestions: "off"
                             }}
                             onMount={(editor) => {
                               editor.focus();
                               editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => {
                                 addBook();
                               });
+                              // Custom styling for writing environment
+                              const container = editor.getContainerDomNode();
+                              container.style.borderRadius = "8px";
+                              container.style.overflow = "hidden";
+                              container.style.boxShadow = "inset 0 1px 2px rgba(0, 0, 0, 0.1)";
+                              
+                              // Style the editor content area
+                              const contentArea = container.querySelector('.monaco-editor-background');
+                              if (contentArea) {
+                                (contentArea as HTMLElement).style.backgroundColor = "rgb(250, 250, 250)";
+                              }
+                              
+                              // Remove code editor styling
+                              const editorElement = container.querySelector('.monaco-editor');
+                              if (editorElement) {
+                                (editorElement as HTMLElement).style.border = "none";
+                                (editorElement as HTMLElement).style.outline = "none";
+                              }
                             }}
                           />
                         </div>
