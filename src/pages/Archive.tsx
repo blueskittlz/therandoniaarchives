@@ -791,7 +791,7 @@ const Archive = () => {
                               automaticLayout: true,
                               fontSize: 16,
                               fontFamily: "ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif",
-                              theme: "vs",
+                              theme: "vs-dark",
                               renderLineHighlight: "none",
                               overviewRulerBorder: false,
                               hideCursorInOverviewRuler: true,
@@ -839,11 +839,11 @@ const Archive = () => {
                               container.style.overflow = "hidden";
                               container.style.boxShadow = "inset 0 1px 2px rgba(0, 0, 0, 0.1)";
                               
-                              // Style the editor content area
-                              const contentArea = container.querySelector('.monaco-editor-background');
-                              if (contentArea) {
-                                (contentArea as HTMLElement).style.backgroundColor = "rgb(250, 250, 250)";
-                              }
+                                                           // Style the editor content area
+                             const contentArea = container.querySelector('.monaco-editor-background');
+                             if (contentArea) {
+                               (contentArea as HTMLElement).style.backgroundColor = "rgb(30, 30, 30)";
+                             }
                               
                               // Remove code editor styling
                               const editorElement = container.querySelector('.monaco-editor');
