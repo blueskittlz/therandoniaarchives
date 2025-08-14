@@ -151,6 +151,8 @@ const Archive = () => {
   const [helpOpen, setHelpOpen] = useState(false);
   const [retro, setRetro] = useState(false);
   const [snakeOpen, setSnakeOpen] = useState(false);
+  const [isDraggingFile, setIsDraggingFile] = useState(false);
+  const ADD_DRAFT_KEY = "addDraft";
 
   const currentPages = useMemo(() => paginate(expandedBook?.content_md || ""), [expandedBook]);
   const currentPageText = currentPages[pageIndex] || "";
@@ -248,6 +250,26 @@ const Archive = () => {
     }
   };
 
+  const handleDrop = async (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setIsDraggingFile(false);
+    const file = e.dataTransfer.files?.[0];
+    if (!file) return;
+    if (!file.name.toLowerCase().endsWith(".txt")) {
+      toast({ title: "Unsupported file", description: "Please drop a .txt file." });
+      return;
+    }
+    const text = await file.text();
+    setContent(text);
+  };
+
+  const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    if (!isDraggingFile) setIsDraggingFile(true);
+  };
+
+  const handleDragLeave = () => setIsDraggingFile(false);
+
   const addBook = async () => {
     const trimmedContent = content.trim();
     if (!trimmedContent) {
@@ -284,6 +306,7 @@ const Archive = () => {
     setTitle("");
     setContent("");
     setNewGenre("Misc");
+    localStorage.removeItem(ADD_DRAFT_KEY);
     setOpen(false);
     fetchBooks();
     toast({ title: "Book added", description: `“${finalTitle}” saved (${estimatedPages} page${estimatedPages > 1 ? "s" : ""}).` });
@@ -424,6 +447,36 @@ const Archive = () => {
     }
   }, [expandedBook]);
 
+  // Load add draft when dialog opens
+  useEffect(() => {
+    if (!open) return;
+    const raw = localStorage.getItem(ADD_DRAFT_KEY);
+    if (raw) {
+      try {
+        const d = JSON.parse(raw);
+        if (typeof d?.title === "string") setTitle(d.title);
+        if (typeof d?.content === "string") setContent(d.content);
+        if (typeof d?.genre === "string" && (GENRES as readonly string[]).includes(d.genre)) setNewGenre(d.genre as Genre);
+      } catch {}
+    }
+  }, [open]);
+
+  // Autosave add draft
+  useEffect(() => {
+    if (!open) return;
+    const t = setTimeout(() => {
+      localStorage.setItem(ADD_DRAFT_KEY, JSON.stringify({ title, content, genre: newGenre }));
+    }, 400);
+    return () => clearTimeout(t);
+  }, [open, title, content, newGenre]);
+
+  const clearAddDraft = () => {
+    setTitle("");
+    setContent("");
+    setNewGenre("Misc");
+    localStorage.removeItem(ADD_DRAFT_KEY);
+  };
+
   const clearFilters = () => {
     setSearchQuery("");
     setDebouncedQuery("");
@@ -559,50 +612,91 @@ const Archive = () => {
               <span className="text-xs text-muted-foreground">Retro</span>
               <Switch checked={retro} onCheckedChange={setRetro} />
             </div>
-            <Dialog open={open} onOpenChange={setOpen}>
+            <Dialog open={open} onOpenChange={(next) => {
+              if (!next) {
+                if ((title.trim() || content.trim()) && !window.confirm("Discard your unsaved draft?")) return;
+              }
+              setOpen(next);
+            }}>
               <DialogTrigger asChild>
                 <Button variant="hero" size="sm" className="gap-1" disabled={supabaseMissing || !canWrite}>
                   <Plus className="h-4 w-4" /> Add Book
                 </Button>
               </DialogTrigger>
-              <DialogContent className="sm:max-w-[720px]">
+              <DialogContent className="sm:max-w-[960px]">
                 <DialogHeader>
                   <DialogTitle>Add a new book</DialogTitle>
                   <DialogDescription>Paste or import the book content and save it to your archive.</DialogDescription>
                 </DialogHeader>
                 <div className="space-y-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="title">Title (optional)</Label>
-                    <Input id="title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Auto from first line if empty" />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Genre</Label>
-                    <Select value={newGenre} onValueChange={(v) => setNewGenre(v as Genre)}>
-                      <SelectTrigger className="w-full max-w-xs">
-                        <SelectValue placeholder="Select a genre" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {GENRES.filter((g) => g !== "All").map((g) => (
-                          <SelectItem key={g} value={g}>{g}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <Label htmlFor="content">Book content</Label>
-                      <span className="text-xs text-muted-foreground">~{estimatedPages} page{estimatedPages > 1 ? "s" : ""}</span>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div className="space-y-3">
+                      <div className="space-y-2">
+                        <Label htmlFor="title">Title (optional)</Label>
+                        <Input id="title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Auto from first line if empty" className="retro-input" />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Genre</Label>
+                        <Select value={newGenre} onValueChange={(v) => setNewGenre(v as Genre)}>
+                          <SelectTrigger className="w-full max-w-xs">
+                            <SelectValue placeholder="Select a genre" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {GENRES.filter((g) => g !== "All").map((g) => (
+                              <SelectItem key={g} value={g}>{g}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <Label htmlFor="content">Book content</Label>
+                          <span className="text-xs text-muted-foreground">~{estimatedPages} page{estimatedPages > 1 ? "s" : ""}</span>
+                        </div>
+                        <div
+                          onDrop={handleDrop}
+                          onDragOver={handleDragOver}
+                          onDragLeave={handleDragLeave}
+                          className={`rounded-md border ${isDraggingFile ? "border-dashed border-primary bg-background/50" : ""}`}
+                        >
+                          <Textarea
+                            id="content"
+                            value={content}
+                            onChange={(e) => setContent(e.target.value)}
+                            onKeyDown={(e) => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "enter") addBook(); }}
+                            placeholder="Paste or drop a .txt file here..."
+                            className="min-h-[240px]"
+                          />
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          <Button type="button" variant="secondary" onClick={pasteFromClipboard}>Paste from clipboard</Button>
+                          <input ref={fileRef} type="file" accept=".txt" className="hidden" onChange={onTxtSelected} />
+                          <Button type="button" variant="outline" onClick={() => fileRef.current?.click()}>Import .txt</Button>
+                          <Button type="button" variant="ghost" onClick={clearAddDraft}>Clear</Button>
+                          <Button type="button" variant="ghost" onClick={() => setContent("Minecraft Realm Book\n\nOnce upon a time in Randonia...\n\nThis is a sample page. Replace with your own content.")}>Sample</Button>
+                        </div>
+                      </div>
                     </div>
-                    <Textarea id="content" value={content} onChange={(e) => setContent(e.target.value)} placeholder="Paste the full book here..." className="min-h-[220px]" />
-                    <div className="flex flex-wrap gap-2">
-                      <Button type="button" variant="secondary" onClick={pasteFromClipboard}>Paste from clipboard</Button>
-                      <input ref={fileRef} type="file" accept=".txt" className="hidden" onChange={onTxtSelected} />
-                      <Button type="button" variant="outline" onClick={() => fileRef.current?.click()}>Import .txt</Button>
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <div className="text-sm text-muted-foreground">Live preview</div>
+                        <div className="text-xs text-muted-foreground">
+                          {content.trim().split(/\s+/).filter(Boolean).length} words • {content.length} chars • {paginate(content).length} pages
+                        </div>
+                      </div>
+                      <div className="rounded-md border bg-background/40 p-3 min-h-[240px]">
+                        <article className="prose prose-sm max-w-none whitespace-pre-wrap">
+                          {paginate(content)[0] || "Your first page will appear here..."}
+                        </article>
+                      </div>
                     </div>
                   </div>
-                  <div className="flex justify-end gap-2">
-                    <Button variant="secondary" onClick={() => setOpen(false)}>Cancel</Button>
-                    <Button onClick={addBook} disabled={supabaseMissing || !canWrite}>Save</Button>
+                  <div className="flex justify-between items-center">
+                    <div className="text-xs text-muted-foreground">Press Ctrl/⌘+Enter to save</div>
+                    <div className="flex gap-2">
+                      <Button variant="secondary" onClick={() => setOpen(false)}>Cancel</Button>
+                      <Button onClick={addBook} disabled={supabaseMissing || !canWrite || content.trim().length === 0}>Save</Button>
+                    </div>
                   </div>
                 </div>
               </DialogContent>
